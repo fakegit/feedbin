@@ -10,7 +10,6 @@ class Subscription < ApplicationRecord
 
   after_create :add_feed_to_action
   after_commit :remove_feed_from_action, on: [:destroy]
-  after_commit :cache_entry_ids, on: [:create, :destroy]
 
   before_destroy :prevent_generated_destroy
   before_destroy :mark_as_read
@@ -26,6 +25,7 @@ class Subscription < ApplicationRecord
 
   enum kind: {default: 0, generated: 1}
   enum view_mode: {article: 0, extract: 1, newsletter: 2}
+  enum show_status: {not_show: 0, hidden: 1, subscribed: 2, bookmarked: 3}
 
   def self.create_multiple(feeds, user, valid_feed_ids)
     @subscriptions = feeds.each_with_object([]) { |(feed_id, subscription), array|
@@ -59,11 +59,11 @@ class Subscription < ApplicationRecord
   end
 
   def add_feed_to_action
-    AddFeedToAction.perform_async(user_id)
+    Search::AddFeedToAction.perform_async(user_id)
   end
 
   def remove_feed_from_action
-    RemoveFeedFromAction.perform_async(user_id, feed_id)
+    Search::RemoveFeedFromAction.perform_async(user_id, feed_id)
   end
 
   def expire_stat_cache
@@ -88,13 +88,14 @@ class Subscription < ApplicationRecord
     end
   end
 
+  def protected?
+    generated?
+  end
+
   private
 
   def refresh_favicon
     FaviconFetcher.perform_async(feed.host)
-  end
-
-  def cache_entry_ids
-    RedisServerSetup.new.perform(feed_id)
+    ImageCrawler::ItunesFeedImage.perform_async(feed_id)
   end
 end

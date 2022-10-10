@@ -45,10 +45,12 @@ class User < ApplicationRecord
     :favicon_colors,
     :newsletter_tag,
     :feeds_width,
-    :entries_width
+    :entries_width,
+    :billing_issue
 
   has_one :coupon
   has_many :subscriptions, dependent: :delete_all
+  has_many :podcast_subscriptions, dependent: :delete_all
   has_many :feeds, through: :subscriptions
   has_many :entries, through: :feeds
   has_many :imports, dependent: :destroy
@@ -63,10 +65,13 @@ class User < ApplicationRecord
   has_many :actions, dependent: :destroy
   has_many :recently_read_entries, dependent: :delete_all
   has_many :recently_played_entries, dependent: :delete_all
+  has_many :queued_entries, dependent: :delete_all
   has_many :updated_entries, dependent: :delete_all
   has_many :devices, dependent: :delete_all
   has_many :authentication_tokens, dependent: :delete_all
+  has_many :account_migrations, dependent: :delete_all
   has_many :in_app_purchases
+  has_many :app_store_notifications
   belongs_to :plan
 
   accepts_nested_attributes_for :sharing_services,
@@ -80,10 +85,7 @@ class User < ApplicationRecord
   before_save { reset_auth_token }
 
   before_create :create_customer, unless: -> { !ENV["STRIPE_API_KEY"] }
-  before_create { generate_token(:starred_token) }
-  before_create { generate_token(:inbound_email_token, 4) }
-  before_create { generate_newsletter_token }
-  before_create { generate_token(:page_token) }
+  before_create { generate_tokens }
 
   before_update :update_billing, unless: -> { !ENV["STRIPE_API_KEY"] }
   before_destroy :cancel_billing, unless: -> { !ENV["STRIPE_API_KEY"] }
@@ -103,8 +105,12 @@ class User < ApplicationRecord
     NewsletterSender.where(token: newsletter_authentication_token.token).order(name: :asc)
   end
 
-  def generate_newsletter_token
+  def generate_tokens
+    generate_token(:starred_token)
+    generate_token(:inbound_email_token, 4)
+    generate_token(:page_token)
     authentication_tokens.newsletters.new(length: 4)
+    authentication_tokens.app.new
   end
 
   def theme
@@ -211,7 +217,7 @@ class User < ApplicationRecord
     valid_plans = if free_ok
       Plan.all.pluck(:id)
     else
-      Plan.where(price_tier: price_tier).where.not(stripe_id: "free").pluck(:id)
+      Plan.where(price_tier: price_tier).where.not(stripe_id: ["free", "app-subscription", "podcast-subscription"]).pluck(:id)
     end
 
     valid_plans.append(plan_id_was)
@@ -228,7 +234,7 @@ class User < ApplicationRecord
     elsif plan_stripe_id == "free"
       Plan.where(price_tier: price_tier)
     else
-      exclude = ["free", "trial", "timed"]
+      exclude = ["free", "trial", "timed", "app-subscription", "podcast-subscription"]
       Plan.where(price_tier: price_tier).where.not(stripe_id: exclude)
     end
   end
@@ -239,6 +245,10 @@ class User < ApplicationRecord
 
   def timed_plan?
     plan.stripe_id == "timed"
+  end
+
+  def app_plan?
+    plan.stripe_id == "app-subscription"
   end
 
   def trial_plan_valid
@@ -306,7 +316,7 @@ class User < ApplicationRecord
 
     self.stripe_token = nil
   rescue Stripe::StripeError => exception
-    Honeybadger.notify(exception)
+    ErrorService.notify(exception)
     errors.add :base, exception.message.to_s
     self.stripe_token = nil
     throw(:abort)
@@ -359,7 +369,7 @@ class User < ApplicationRecord
   end
 
   def subscribed_to?(feed_id)
-    subscriptions.where(feed_id: feed_id).exists?
+    subscriptions.where(feed_id: feed_id).exists? || podcast_subscriptions.where(feed_id: feed_id).exists?
   end
 
   def self.search(query)
@@ -418,7 +428,7 @@ class User < ApplicationRecord
   end
 
   def create_deleted_user
-    DeletedUser.create(email: email, customer_id: customer_id)
+    DeletedUser.create(email: email, customer_id: customer_id, original_user_id: id)
   end
 
   def record_stats
@@ -429,8 +439,16 @@ class User < ApplicationRecord
     end
   end
 
+  def billing_issue?
+    billing_issue == "1"
+  end
+
+  def billing_issue!
+    update(billing_issue: "1")
+  end
+
   def activate
-    update(suspended: false)
+    update(suspended: false, billing_issue: "0")
     subscriptions.update_all(active: true)
   end
 
@@ -501,6 +519,10 @@ class User < ApplicationRecord
       can_read = true
     end
 
+    if !can_read && queued_entries.where(entry: entry).exists?
+      can_read = true
+    end
+
     can_read
   end
 
@@ -535,6 +557,11 @@ class User < ApplicationRecord
       allowed_ids = allowed_ids.push(ids).flatten
     end
 
+    if requested_ids.length != allowed_ids.length
+      ids = queued_entries.where(entry_id: requested_ids).pluck(:entry_id)
+      allowed_ids = allowed_ids.push(ids).flatten
+    end
+
     allowed_ids.uniq
   end
 
@@ -553,8 +580,12 @@ class User < ApplicationRecord
   end
 
   def recently_played_entries_progress
-    recently_played_entries.select(:duration, :progress, :entry_id).each_with_object({}) do |item, hash|
-      hash[item.entry_id] = {progress: item.progress, duration: item.duration}
+    (queued_entries + recently_played_entries).each_with_object({}) do |item, hash|
+      progress = item.progress
+      if existing = hash[item.entry_id]
+        progress = [existing[:progress], progress].max
+      end
+      hash[item.entry_id] = {progress: progress, duration: item.duration}
     end
   end
 

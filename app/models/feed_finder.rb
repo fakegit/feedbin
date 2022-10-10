@@ -18,6 +18,8 @@ class FeedFinder
   def find
     feeds = []
 
+    existing_feed = Feed.xml.where(feed_url: url).take
+
     if feeds.empty?
       feeds = Source::TwitterData.find(url, twitter_auth)
     end
@@ -46,17 +48,23 @@ class FeedFinder
       feeds = Source::Guess.find(response)
     end
 
+    if feeds.empty? && import_mode? && existing_feed.present?
+      feeds.push(existing_feed)
+    end
+
     feeds
   rescue Feedkit::Unauthorized
     raise
   rescue => exception
-    if Rails.env.production?
+    if import_mode? && existing_feed.present?
+      return [existing_feed]
+    elsif import_mode? || Rails.env.development?
+      raise exception
+    else
       Rails.logger.error exception.message
       Rails.logger.error exception.backtrace.join("\n")
-      Honeybadger.notify(exception)
+      ErrorService.notify(exception)
       feeds
-    else
-      raise exception
     end
   end
 

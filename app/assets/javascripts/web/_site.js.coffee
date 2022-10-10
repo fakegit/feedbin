@@ -26,6 +26,7 @@ $.extend feedbin,
   colorHash: new ColorHash
   scrollStarted: false
   loadingMore: false
+  remoteContentIntervals: {}
 
   prepareShareMenu: (data) ->
     buildLink = (item, data, index) ->
@@ -83,8 +84,9 @@ $.extend feedbin,
       feedbin.hideLinkAction(url)
 
   changeContentView: (view) ->
-    currentView = $('[data-behavior~=content_option]:not(.hide)')
-    nextView = $("[data-behavior~=content_option][data-content-option=#{view}]")
+    id = feedbin.selectedEntry.id
+    currentView = $("[data-entry-id=#{id}] [data-behavior~=content_option]:not(.hide)")
+    nextView = $("[data-entry-id=#{id}] [data-behavior~=content_option][data-content-option=#{view}]")
 
     if view == 'extract'
       $('body').addClass('extract-active')
@@ -308,6 +310,12 @@ $.extend feedbin,
   setThemeColor: ->
     color = feedbin.colorForSection("body")
     $('meta[name=theme-color]').attr("content", color)
+    if feedbin.darkMode()
+      $('body').removeClass("prefers-light")
+      $('body').addClass("prefers-dark")
+    else
+      $('body').removeClass("prefers-dark")
+      $('body').addClass("prefers-light")
 
   colorForSection: (section, overlay = false) ->
     color = $("[data-theme-#{section}]").css("backgroundColor")
@@ -319,10 +327,14 @@ $.extend feedbin,
     ctx.strokeStyle = color
     ctx.strokeStyle
 
-  setNativeTheme: (calculateOverlay = false, timeout = 1) ->
+  nativeTheme: ->
     if feedbin.native && feedbin.data && feedbin.theme
-      result = window.matchMedia('(prefers-color-scheme: dark)');
-      statusBar = if $("body").hasClass("theme-dusk") || $("body").hasClass("theme-midnight") || result.matches == true then "lightContent" else "default"
+      feedbin.nativeMessage("performAction", { themeName: feedbin.theme })
+
+  setNativeTheme: (calculateOverlay = false, timeout = 1) ->
+    feedbin.nativeTheme()
+    if feedbin.native && feedbin.data && feedbin.theme
+      statusBar = if $("body").hasClass("theme-dusk") || $("body").hasClass("theme-midnight") then "lightContent" else "default"
       message = {
         action: "titleColor",
         statusBar: statusBar
@@ -973,7 +985,7 @@ $.extend feedbin,
       feedbin.removeOuterLinks()
       feedbin.formatIframes($("[data-iframe-src]").not("[data-behavior~=iframe_placeholder]"))
       feedbin.playState()
-      feedbin.timeRemaining(entryId)
+      feedbin.timeRemaining(entryId, true)
       feedbin.syntaxHighlight()
       feedbin.footnotes()
       feedbin.nextEntryPreview()
@@ -1296,7 +1308,7 @@ $.extend feedbin,
     $('> [data-behavior~=sort_feed]', target).sort(feedbin.sortByFeedOrder).detach().appendTo(target)
 
   sortFeeds: ->
-      $('.drawer ul').each ->
+      $('[data-behavior~=feed_drawer] ul').each ->
         feedbin.sort $(@)
       feedbin.sort $('[data-behavior~=feeds_target]')
 
@@ -1447,6 +1459,25 @@ $.extend feedbin,
     feedbin.measureEntryColumn()
     feedbin.setNativeBorders()
 
+  baseFontSize: ->
+    element = document.createElement('div')
+    content = document.createTextNode('content')
+    element.appendChild content
+    element.style.display = 'none'
+    element.style.font = '-apple-system-body'
+
+    if element.style.font != "" && "ontouchend" of document
+      document.body.appendChild element
+      style = window.getComputedStyle(element, null)
+      size = style.getPropertyValue 'font-size'
+      base = parseInt(size) - 1
+      element.parentNode.removeChild(element)
+    else
+      base = "16"
+
+    $("html").css
+      "font-size": "#{base}px"
+
   embeds: {}
 
   entries: {}
@@ -1516,23 +1547,7 @@ $.extend feedbin,
       $(window).on('window:throttledResize', feedbin.panelCount);
 
     baseFontSize: ->
-      element = document.createElement('div')
-      content = document.createTextNode('content')
-      element.appendChild content
-      element.style.display = 'none'
-      element.style.font = '-apple-system-body'
-
-      if element.style.font != "" && "ontouchend" of document
-        document.body.appendChild element
-        style = window.getComputedStyle(element, null)
-        size = style.getPropertyValue 'font-size'
-        base = parseInt(size) - 1
-        element.parentNode.removeChild(element)
-      else
-        base = "16"
-
-      $("html").css
-        "font-size": "#{base}px"
+      feedbin.baseFontSize()
 
     faviconColors: ->
       feedbin.faviconColors($("body"))
@@ -1944,7 +1959,7 @@ $.extend feedbin,
         container.toggleClass('open')
         container.addClass('animate')
 
-        drawer = container.find('.drawer')
+        drawer = container.find('[data-behavior~=feed_drawer]')
 
         if open
           windowHeight = window.innerHeight
@@ -2170,6 +2185,7 @@ $.extend feedbin,
         $('[data-behavior~=class_target]').removeClass('theme-midnight')
         $('[data-behavior~=class_target]').removeClass('theme-auto')
         $('[data-behavior~=class_target]').addClass("theme-#{theme}")
+        feedbin.theme = theme
         feedbin.setThemeColor()
 
     titleBarColor: ->
@@ -2792,10 +2808,12 @@ $.extend feedbin,
         $(@).tooltip('hide')
 
     colorSchemePreference: ->
+      feedbin.setThemeColor()
       darkModeMediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
       darkModeMediaQuery.addListener (event) ->
-          feedbin.setThemeColor()
-          setTimeout feedbin.setNativeTheme, 300
+        console.log "called"
+        feedbin.setThemeColor()
+        setTimeout feedbin.setNativeTheme, 300
 
     visibilitychange: ->
       $(document).on 'visibilitychange', (event) ->
@@ -2873,6 +2891,16 @@ $.extend feedbin,
 
         event.preventDefault()
         event.stopPropagation()
+
+    updateContent: ->
+      $('[data-content-src]').each ->
+        element = $(@)
+        src = element.data('content-src')
+
+        callback = ->
+          $.get(src)
+
+        feedbin.remoteContentIntervals[src] = setInterval callback, 3000
 
     copy: ->
       $(document).on 'click', '[data-behavior~=copy]', (event) ->

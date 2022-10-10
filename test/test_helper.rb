@@ -1,25 +1,9 @@
-require "coveralls"
-Coveralls.wear!("rails")
-
 ENV["RAILS_ENV"] ||= "test"
 
-require File.expand_path("../../config/environment", __FILE__)
-require "rails/test_help"
 require "minitest"
 require "minitest/mock"
-require "sidekiq/testing"
-require "webmock/minitest"
-
-require "support/login_helper"
-require "support/factory_helper"
-require "support/assertions"
-require "support/api_controller_test_case"
-require "support/push_server_mock"
-
-ActiveRecord::FixtureSet.context_class.send :include, LoginHelper
-StripeMock.webhook_fixture_path = "./test/fixtures/stripe_webhooks/"
-WebMock.disable_net_connect!(allow_localhost: true, allow: "codeclimate.com")
-Sidekiq.logger.level = Logger::WARN
+require "socket"
+require "connection_pool"
 
 unless ENV["CI"]
   socket = Socket.new(:INET, :STREAM, 0)
@@ -40,6 +24,23 @@ $redis = {
   refresher: ConnectionPool.new(size: 10) { Redis.new(url: ENV["REDIS_URL"]) }
 }
 
+require File.expand_path("../../config/environment", __FILE__)
+
+require "rails/test_help"
+require "sidekiq/testing"
+require "webmock/minitest"
+
+require "support/login_helper"
+require "support/factory_helper"
+require "support/assertions"
+require "support/api_controller_test_case"
+require "support/push_server_mock"
+
+ActiveRecord::FixtureSet.context_class.send :include, LoginHelper
+StripeMock.webhook_fixture_path = "./test/fixtures/stripe_webhooks/"
+WebMock.disable_net_connect!(allow_localhost: true)
+Sidekiq.logger.level = Logger::WARN
+
 class ActiveSupport::TestCase
   include LoginHelper
   include FactoryHelper
@@ -47,6 +48,8 @@ class ActiveSupport::TestCase
   fixtures :all
 
   def flush_redis
+    Sidekiq::Worker.clear_all
+
     Sidekiq.redis do |redis|
       redis.flushdb
     end
@@ -65,6 +68,31 @@ class ActiveSupport::TestCase
     File.join(Rails.root, "test/support/www", file)
   end
 
+  def copy_support_file(file_name)
+    path = File.join Dir.tmpdir, SecureRandom.hex
+    FileUtils.cp File.join("test/support/www", file_name), path
+    path
+  end
+
+  def load_xml
+    File.read("test/support/www/atom.xml")
+  end
+
+  def random_string
+    (0...50).map { ("a".."z").to_a[rand(26)] }.join
+  end
+
+  def aws_copy_body
+    <<~EOT
+      <?xml version="1.0" encoding="UTF-8"?>
+      <CopyObjectResult>
+         <ETag>string</ETag>
+         <LastModified>Tue, 02 Mar 2021 12:58:45 GMT</LastModified>
+      </CopyObjectResult>
+    EOT
+  end
+
+
   def stub_request_file(file, url, response_options = {})
     options = {body: File.new(support_file(file)), status: 200}.merge(response_options)
     stub_request(:get, url)
@@ -72,7 +100,14 @@ class ActiveSupport::TestCase
   end
 
   def load_tweet(option)
-    JSON.parse(File.read(support_file("tweet_#{option}.json")))
+    load_support_json("tweet_#{option}")
+  end
+
+  def load_support_json(file_name)
+    unless file_name.end_with?(".json")
+      file_name = "#{file_name}.json"
+    end
+    JSON.parse(File.read(support_file(file_name)))
   end
 
   def create_stripe_plan(plan)

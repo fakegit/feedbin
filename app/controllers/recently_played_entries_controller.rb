@@ -21,8 +21,15 @@ class RecentlyPlayedEntriesController < ApplicationController
   def create
     @user = current_user
     if @user.can_read_entry?(params[:id])
-      if record = @user.recently_played_entries.find_or_create_by(entry_id: params[:id])
-        record.update(recently_played_entry_params)
+      if queued = @user.queued_entries.find_by(entry_id: params[:id])
+        queued.update(recently_played_entry_params)
+      end
+      if recent = @user.recently_played_entries.find_by(entry_id: params[:id])
+        recent.update(recently_played_entry_params)
+      end
+      if !recent && !queued
+        recent = @user.recently_played_entries.find_or_create_by(entry_id: params[:id])
+        recent.update(recently_played_entry_params)
       end
     end
     head :ok
@@ -33,9 +40,18 @@ class RecentlyPlayedEntriesController < ApplicationController
     @user.recently_played_entries.delete_all
   end
 
+  def progress
+    @user = current_user
+    render json: @user.recently_played_entries_progress.to_json
+  end
+
   private
 
   def recently_played_entry_params
+    params.require(:recently_played_entry).permit(:progress, :duration)
+  end
+
+  def queued_entry_params
     params.require(:recently_played_entry).permit(:progress, :duration)
   end
 end

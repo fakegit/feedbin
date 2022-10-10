@@ -1,5 +1,6 @@
 class Feed < ApplicationRecord
   has_many :subscriptions
+  has_many :podcast_subscriptions
   has_many :entries
   has_many :users, through: :subscriptions
   has_many :unread_entries
@@ -18,6 +19,7 @@ class Feed < ApplicationRecord
 
   after_commit :web_sub_subscribe, on: :create
 
+  attribute :crawl_data, CrawlDataType.new
   attr_accessor :count, :tags
   attr_readonly :feed_url
 
@@ -25,7 +27,7 @@ class Feed < ApplicationRecord
 
   enum feed_type: {xml: 0, newsletter: 1, twitter: 2, twitter_home: 3, pages: 4}
 
-  store :settings, accessors: [:custom_icon], coder: JSON
+  store :settings, accessors: [:custom_icon, :current_feed_url, :custom_icon_format], coder: JSON
 
   def twitter_user?
     twitter_user.present?
@@ -54,7 +56,8 @@ class Feed < ApplicationRecord
     if delete_existing
       Tagging.where(user_id: user, feed_id: id).destroy_all
     end
-    names.split(",").map do |name|
+    names = names.split(",") if names.is_a?(String)
+    names.map do |name|
       name = name.strip
       unless name.blank?
         tag = Tag.where(name: name.strip).first_or_create!
@@ -129,15 +132,10 @@ class Feed < ApplicationRecord
   def priority_refresh(user = nil)
     if twitter_feed?
       if 10.minutes.ago > updated_at
-        TwitterFeedRefresher.new.enqueue_feed(self, user)
+        FeedCrawler::TwitterSchedule.new.enqueue_feed(self, user)
       end
     else
-      Sidekiq::Client.push_bulk(
-        "args" => [[id, feed_url, subscriptions_count]],
-        "class" => "FeedDownloaderCritical",
-        "queue" => "feed_downloader_critical",
-        "retry" => false
-      )
+      FeedCrawler::DownloaderCritical.perform_async(id, feed_url, subscriptions_count, crawl_data.to_h)
     end
   end
 
@@ -174,7 +172,7 @@ class Feed < ApplicationRecord
   end
 
   def web_sub_subscribe
-    WebSubSubscribe.perform_async(id)
+    WebSub::Subscribe.perform_async(id)
   end
 
   def hubs
@@ -214,10 +212,21 @@ class Feed < ApplicationRecord
     end
   end
 
+  def redirect_key
+    "refresher_redirect_stable_%d" % id
+  end
+
+  def rebase_url(original_url)
+    base_url = Addressable::URI.heuristic_parse(site_url)
+    original_url = Addressable::URI.heuristic_parse(original_url)
+    Addressable::URI.join(base_url, original_url)
+  end
+
   private
 
   def refresh_favicon
     FaviconFetcher.perform_async(host)
+    ImageCrawler::ItunesFeedImage.perform_async(id)
   end
 
   def default_values

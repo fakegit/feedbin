@@ -11,11 +11,11 @@ class DevicePushNotificationSend
     key_id: ENV["APPLE_KEY_ID"]
   }
   APNOTIC_POOL = Apnotic::ConnectionPool.new(apnotic_options, size: 5) { |connection|
-    connection.on(:error) { |exception| Honeybadger.notify(exception) }
+    connection.on(:error) { |exception| ErrorService.notify(exception) }
   }
 
   def perform(user_ids, entry_id, skip_read)
-    Honeybadger.context(user_ids: user_ids, entry_id: entry_id)
+    ErrorService.context(user_ids: user_ids, entry_id: entry_id)
 
     entry = Entry.find(entry_id)
 
@@ -23,7 +23,7 @@ class DevicePushNotificationSend
       user_ids = UnreadEntry.where(entry: entry, user_id: user_ids).pluck(:user_id)
     end
 
-    tokens = Device.where(user_id: user_ids).ios.pluck(:user_id, :token, :operating_system)
+    tokens = Device.where(user_id: user_ids).notifier.pluck(:user_id, :token, :operating_system)
     feed = entry.feed
 
     feed_titles = subscription_titles(user_ids, feed)

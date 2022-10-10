@@ -63,9 +63,15 @@ Rails.application.routes.draw do
   resources :tags, only: [:index, :show, :update, :destroy, :edit]
   resources :billing_events, only: [:show]
   resources :in_app_purchases, only: [:show]
+  resources :app_store_notifications, only: [:show]
   resources :password_resets
   resources :sharing_services, path: "settings/sharing", only: [:index, :create, :update, :destroy]
   resources :actions, path: "settings/actions", only: [:index, :create, :new, :update, :destroy, :edit]
+  resources :account_migrations, path: "settings/account_migrations" do
+    member do
+      patch :start
+    end
+  end
   resources :saved_searches, only: [:show, :update, :destroy, :create, :edit, :new] do
     collection do
       get :count
@@ -165,10 +171,13 @@ Rails.application.routes.draw do
         patch :newsletter_senders
       end
     end
+
+    resources :imports, only: [:create, :show]
+    get :import_export, to: "imports#index"
+
     get :account
     get :billing
     get :payment_details
-    get :import_export
     get :appearance
     get :newsletters_pages
     post :update_credit_card
@@ -206,9 +215,12 @@ Rails.application.routes.draw do
     end
   end
 
+  resources :queued_entries, only: [:index]
+
   resources :recently_played_entries, only: [] do
     collection do
       delete :destroy_all
+      get :progress
     end
   end
 
@@ -237,6 +249,24 @@ Rails.application.routes.draw do
 
   constraints subdomain: "api" do
     namespace :api, path: nil do
+      namespace :public do
+        namespace :v1 do
+          resources :feeds, only: :show
+        end
+      end
+
+      namespace :podcasts do
+        namespace :v1 do
+          resources :feeds, only: :show
+          resources :subscriptions, only: [:index, :create, :update, :destroy]
+          namespace :queued_entries do
+            resource :bulk, controller: :bulk, only: [:update]
+          end
+          resources :queued_entries, only: [:index, :create, :update, :destroy]
+          post :authentication, to: "authentication#index"
+        end
+      end
+
       namespace :v2 do
         resources :feeds, only: [:show] do
           resources :entries, only: [:index, :show], controller: :feeds_entries
@@ -267,6 +297,7 @@ Rails.application.routes.draw do
         resources :users, only: [:create] do
           collection do
             get :info
+            delete :destroy
           end
         end
 
@@ -286,6 +317,7 @@ Rails.application.routes.draw do
         resources :recently_read_entries, only: [:index, :create]
         resources :in_app_purchases, only: [:create]
         resources :suggested_categories, only: [:index]
+        resources :authentication_tokens, only: [:create]
 
         resources :entries, only: [:index, :show] do
           member do
@@ -329,4 +361,9 @@ Rails.application.routes.draw do
   namespace :admin do
     resources :users
   end
+
+  namespace :app_store do
+    resources :notifications_v2, only: :create
+  end
+
 end

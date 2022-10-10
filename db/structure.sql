@@ -34,12 +34,95 @@ CREATE EXTENSION IF NOT EXISTS pg_stat_statements WITH SCHEMA public;
 -- Name: EXTENSION pg_stat_statements; Type: COMMENT; Schema: -; Owner: -
 --
 
-COMMENT ON EXTENSION pg_stat_statements IS 'track execution statistics of all SQL statements executed';
+COMMENT ON EXTENSION pg_stat_statements IS 'track planning and execution statistics of all SQL statements executed';
+
+
+--
+-- Name: uuid-ossp; Type: EXTENSION; Schema: -; Owner: -
+--
+
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp" WITH SCHEMA public;
+
+
+--
+-- Name: EXTENSION "uuid-ossp"; Type: COMMENT; Schema: -; Owner: -
+--
+
+COMMENT ON EXTENSION "uuid-ossp" IS 'generate universally unique identifiers (UUIDs)';
 
 
 SET default_tablespace = '';
 
 SET default_table_access_method = heap;
+
+--
+-- Name: account_migration_items; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.account_migration_items (
+    id bigint NOT NULL,
+    account_migration_id bigint NOT NULL,
+    status bigint DEFAULT 0 NOT NULL,
+    data jsonb DEFAULT '{}'::jsonb,
+    message text,
+    created_at timestamp(6) without time zone NOT NULL,
+    updated_at timestamp(6) without time zone NOT NULL
+);
+
+
+--
+-- Name: account_migration_items_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.account_migration_items_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: account_migration_items_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.account_migration_items_id_seq OWNED BY public.account_migration_items.id;
+
+
+--
+-- Name: account_migrations; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.account_migrations (
+    id bigint NOT NULL,
+    user_id bigint NOT NULL,
+    api_token text NOT NULL,
+    status bigint DEFAULT 0 NOT NULL,
+    data jsonb DEFAULT '{}'::jsonb,
+    message text,
+    created_at timestamp(6) without time zone NOT NULL,
+    updated_at timestamp(6) without time zone NOT NULL
+);
+
+
+--
+-- Name: account_migrations_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.account_migrations_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: account_migrations_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.account_migrations_id_seq OWNED BY public.account_migrations.id;
+
 
 --
 -- Name: actions; Type: TABLE; Schema: public; Owner: -
@@ -82,6 +165,44 @@ ALTER SEQUENCE public.actions_id_seq OWNED BY public.actions.id;
 
 
 --
+-- Name: app_store_notifications; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.app_store_notifications (
+    id bigint NOT NULL,
+    user_id bigint NOT NULL,
+    original_transaction_id text NOT NULL,
+    notification_id uuid NOT NULL,
+    notification_type text NOT NULL,
+    subtype text,
+    version text NOT NULL,
+    processed_at timestamp(6) without time zone,
+    created_at timestamp(6) without time zone NOT NULL,
+    updated_at timestamp(6) without time zone NOT NULL,
+    data jsonb NOT NULL
+);
+
+
+--
+-- Name: app_store_notifications_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.app_store_notifications_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: app_store_notifications_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.app_store_notifications_id_seq OWNED BY public.app_store_notifications.id;
+
+
+--
 -- Name: ar_internal_metadata; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -91,6 +212,39 @@ CREATE TABLE public.ar_internal_metadata (
     created_at timestamp without time zone NOT NULL,
     updated_at timestamp without time zone NOT NULL
 );
+
+
+--
+-- Name: attribute_changes; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.attribute_changes (
+    id bigint NOT NULL,
+    trackable_type character varying,
+    trackable_id bigint,
+    name text,
+    created_at timestamp(6) without time zone NOT NULL,
+    updated_at timestamp(6) without time zone NOT NULL
+);
+
+
+--
+-- Name: attribute_changes_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.attribute_changes_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: attribute_changes_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.attribute_changes_id_seq OWNED BY public.attribute_changes.id;
 
 
 --
@@ -105,7 +259,8 @@ CREATE TABLE public.authentication_tokens (
     data jsonb DEFAULT '{}'::jsonb,
     created_at timestamp(6) without time zone NOT NULL,
     updated_at timestamp(6) without time zone NOT NULL,
-    active boolean DEFAULT true NOT NULL
+    active boolean DEFAULT true NOT NULL,
+    uuid uuid DEFAULT public.uuid_generate_v4() NOT NULL
 );
 
 
@@ -207,7 +362,8 @@ CREATE TABLE public.deleted_users (
     email text,
     customer_id text,
     created_at timestamp without time zone,
-    updated_at timestamp without time zone
+    updated_at timestamp without time zone,
+    original_user_id bigint
 );
 
 
@@ -236,14 +392,15 @@ ALTER SEQUENCE public.deleted_users_id_seq OWNED BY public.deleted_users.id;
 
 CREATE TABLE public.devices (
     id bigint NOT NULL,
-    user_id bigint,
-    token text,
+    user_id bigint NOT NULL,
+    token text NOT NULL,
     model text,
-    device_type bigint,
+    device_type bigint NOT NULL,
     created_at timestamp without time zone,
     updated_at timestamp without time zone,
     application text,
-    operating_system text
+    operating_system text,
+    active boolean DEFAULT true
 );
 
 
@@ -329,7 +486,10 @@ CREATE TABLE public.entries (
     recently_played_entries_count bigint DEFAULT 0,
     thread_id bigint,
     settings jsonb,
-    main_tweet_id text
+    main_tweet_id text,
+    queued_entries_count bigint DEFAULT 0 NOT NULL,
+    fingerprint uuid,
+    guid uuid
 );
 
 
@@ -428,10 +588,8 @@ CREATE TABLE public.feeds (
     title text,
     feed_url text,
     site_url text,
-    etag text,
     created_at timestamp without time zone NOT NULL,
     updated_at timestamp without time zone NOT NULL,
-    last_modified timestamp without time zone,
     subscriptions_count bigint DEFAULT 0 NOT NULL,
     protected boolean DEFAULT false,
     push_expiration timestamp without time zone,
@@ -442,7 +600,10 @@ CREATE TABLE public.feeds (
     active boolean DEFAULT true,
     options json,
     hubs text[],
-    settings jsonb
+    settings jsonb,
+    standalone_request_at timestamp(6) without time zone,
+    last_change_check timestamp(6) without time zone,
+    crawl_data jsonb
 );
 
 
@@ -476,7 +637,8 @@ CREATE TABLE public.import_items (
     created_at timestamp without time zone NOT NULL,
     updated_at timestamp without time zone NOT NULL,
     item_type character varying(255),
-    status bigint DEFAULT 0 NOT NULL
+    status bigint DEFAULT 0 NOT NULL,
+    error jsonb
 );
 
 
@@ -509,7 +671,8 @@ CREATE TABLE public.imports (
     complete boolean DEFAULT false,
     created_at timestamp without time zone NOT NULL,
     updated_at timestamp without time zone NOT NULL,
-    upload character varying(255)
+    upload character varying(255),
+    filename text
 );
 
 
@@ -635,6 +798,76 @@ CREATE SEQUENCE public.plans_id_seq
 --
 
 ALTER SEQUENCE public.plans_id_seq OWNED BY public.plans.id;
+
+
+--
+-- Name: podcast_subscriptions; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.podcast_subscriptions (
+    id bigint NOT NULL,
+    user_id bigint NOT NULL,
+    feed_id bigint NOT NULL,
+    status bigint DEFAULT 0 NOT NULL,
+    title text,
+    created_at timestamp(6) without time zone NOT NULL,
+    updated_at timestamp(6) without time zone NOT NULL
+);
+
+
+--
+-- Name: podcast_subscriptions_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.podcast_subscriptions_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: podcast_subscriptions_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.podcast_subscriptions_id_seq OWNED BY public.podcast_subscriptions.id;
+
+
+--
+-- Name: queued_entries; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.queued_entries (
+    id bigint NOT NULL,
+    user_id bigint NOT NULL,
+    entry_id bigint NOT NULL,
+    feed_id bigint NOT NULL,
+    "order" bigint DEFAULT EXTRACT(epoch FROM now()) NOT NULL,
+    progress bigint DEFAULT 0 NOT NULL,
+    duration bigint DEFAULT 0 NOT NULL,
+    created_at timestamp(6) without time zone NOT NULL,
+    updated_at timestamp(6) without time zone NOT NULL
+);
+
+
+--
+-- Name: queued_entries_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.queued_entries_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: queued_entries_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.queued_entries_id_seq OWNED BY public.queued_entries.id;
 
 
 --
@@ -832,7 +1065,8 @@ CREATE TABLE public.subscriptions (
     show_retweets boolean DEFAULT true,
     media_only boolean DEFAULT false,
     kind bigint DEFAULT 0,
-    view_mode bigint DEFAULT 0
+    view_mode bigint DEFAULT 0,
+    show_status bigint DEFAULT 0 NOT NULL
 );
 
 
@@ -1168,10 +1402,38 @@ ALTER SEQUENCE public.users_id_seq OWNED BY public.users.id;
 
 
 --
+-- Name: account_migration_items id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.account_migration_items ALTER COLUMN id SET DEFAULT nextval('public.account_migration_items_id_seq'::regclass);
+
+
+--
+-- Name: account_migrations id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.account_migrations ALTER COLUMN id SET DEFAULT nextval('public.account_migrations_id_seq'::regclass);
+
+
+--
 -- Name: actions id; Type: DEFAULT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.actions ALTER COLUMN id SET DEFAULT nextval('public.actions_id_seq'::regclass);
+
+
+--
+-- Name: app_store_notifications id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.app_store_notifications ALTER COLUMN id SET DEFAULT nextval('public.app_store_notifications_id_seq'::regclass);
+
+
+--
+-- Name: attribute_changes id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.attribute_changes ALTER COLUMN id SET DEFAULT nextval('public.attribute_changes_id_seq'::regclass);
 
 
 --
@@ -1280,6 +1542,20 @@ ALTER TABLE ONLY public.plans ALTER COLUMN id SET DEFAULT nextval('public.plans_
 
 
 --
+-- Name: podcast_subscriptions id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.podcast_subscriptions ALTER COLUMN id SET DEFAULT nextval('public.podcast_subscriptions_id_seq'::regclass);
+
+
+--
+-- Name: queued_entries id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.queued_entries ALTER COLUMN id SET DEFAULT nextval('public.queued_entries_id_seq'::regclass);
+
+
+--
 -- Name: recently_played_entries id; Type: DEFAULT; Schema: public; Owner: -
 --
 
@@ -1385,6 +1661,22 @@ ALTER TABLE ONLY public.users ALTER COLUMN id SET DEFAULT nextval('public.users_
 
 
 --
+-- Name: account_migration_items account_migration_items_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.account_migration_items
+    ADD CONSTRAINT account_migration_items_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: account_migrations account_migrations_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.account_migrations
+    ADD CONSTRAINT account_migrations_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: actions actions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1393,11 +1685,27 @@ ALTER TABLE ONLY public.actions
 
 
 --
+-- Name: app_store_notifications app_store_notifications_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.app_store_notifications
+    ADD CONSTRAINT app_store_notifications_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: ar_internal_metadata ar_internal_metadata_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.ar_internal_metadata
     ADD CONSTRAINT ar_internal_metadata_pkey PRIMARY KEY (key);
+
+
+--
+-- Name: attribute_changes attribute_changes_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.attribute_changes
+    ADD CONSTRAINT attribute_changes_pkey PRIMARY KEY (id);
 
 
 --
@@ -1521,6 +1829,22 @@ ALTER TABLE ONLY public.plans
 
 
 --
+-- Name: podcast_subscriptions podcast_subscriptions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.podcast_subscriptions
+    ADD CONSTRAINT podcast_subscriptions_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: queued_entries queued_entries_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.queued_entries
+    ADD CONSTRAINT queued_entries_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: recently_played_entries recently_played_entries_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1641,10 +1965,52 @@ ALTER TABLE ONLY public.users
 
 
 --
+-- Name: index_account_migration_items_on_account_migration_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_account_migration_items_on_account_migration_id ON public.account_migration_items USING btree (account_migration_id);
+
+
+--
+-- Name: index_account_migrations_on_user_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_account_migrations_on_user_id ON public.account_migrations USING btree (user_id);
+
+
+--
 -- Name: index_actions_on_user_id; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE INDEX index_actions_on_user_id ON public.actions USING btree (user_id);
+
+
+--
+-- Name: index_app_store_notifications_on_notification_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX index_app_store_notifications_on_notification_id ON public.app_store_notifications USING btree (notification_id);
+
+
+--
+-- Name: index_app_store_notifications_on_original_transaction_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_app_store_notifications_on_original_transaction_id ON public.app_store_notifications USING btree (original_transaction_id);
+
+
+--
+-- Name: index_app_store_notifications_on_user_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_app_store_notifications_on_user_id ON public.app_store_notifications USING btree (user_id);
+
+
+--
+-- Name: index_attribute_changes_on_trackable_and_name; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX index_attribute_changes_on_trackable_and_name ON public.attribute_changes USING btree (trackable_id, trackable_type, name);
 
 
 --
@@ -1666,6 +2032,13 @@ CREATE INDEX index_authentication_tokens_on_purpose_and_token_and_active ON publ
 --
 
 CREATE INDEX index_authentication_tokens_on_user_id ON public.authentication_tokens USING btree (user_id);
+
+
+--
+-- Name: index_authentication_tokens_on_uuid; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_authentication_tokens_on_uuid ON public.authentication_tokens USING btree (uuid);
 
 
 --
@@ -1725,10 +2098,10 @@ CREATE UNIQUE INDEX index_embeds_on_source_and_provider_id ON public.embeds USIN
 
 
 --
--- Name: index_entries_on_feed_id; Type: INDEX; Schema: public; Owner: -
+-- Name: index_entries_on_feed_id_include_id_published_created_at; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX index_entries_on_feed_id ON public.entries USING btree (feed_id);
+CREATE INDEX index_entries_on_feed_id_include_id_published_created_at ON public.entries USING btree (feed_id) INCLUDE (id, published, created_at);
 
 
 --
@@ -1823,6 +2196,13 @@ CREATE INDEX index_feeds_on_push_expiration ON public.feeds USING btree (push_ex
 
 
 --
+-- Name: index_feeds_on_standalone_request_at; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_feeds_on_standalone_request_at ON public.feeds USING btree (standalone_request_at DESC) WHERE (standalone_request_at IS NOT NULL);
+
+
+--
 -- Name: index_import_items_on_import_id; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -1862,6 +2242,62 @@ CREATE UNIQUE INDEX index_newsletter_senders_on_feed_id ON public.newsletter_sen
 --
 
 CREATE INDEX index_newsletter_senders_on_token ON public.newsletter_senders USING btree (token);
+
+
+--
+-- Name: index_podcast_subscriptions_on_feed_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_podcast_subscriptions_on_feed_id ON public.podcast_subscriptions USING btree (feed_id);
+
+
+--
+-- Name: index_podcast_subscriptions_on_user_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_podcast_subscriptions_on_user_id ON public.podcast_subscriptions USING btree (user_id);
+
+
+--
+-- Name: index_podcast_subscriptions_on_user_id_and_feed_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX index_podcast_subscriptions_on_user_id_and_feed_id ON public.podcast_subscriptions USING btree (user_id, feed_id);
+
+
+--
+-- Name: index_queued_entries_on_entry_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_queued_entries_on_entry_id ON public.queued_entries USING btree (entry_id);
+
+
+--
+-- Name: index_queued_entries_on_feed_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_queued_entries_on_feed_id ON public.queued_entries USING btree (feed_id);
+
+
+--
+-- Name: index_queued_entries_on_user_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_queued_entries_on_user_id ON public.queued_entries USING btree (user_id);
+
+
+--
+-- Name: index_queued_entries_on_user_id_and_entry_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX index_queued_entries_on_user_id_and_entry_id ON public.queued_entries USING btree (user_id, entry_id);
+
+
+--
+-- Name: index_queued_entries_on_user_id_and_order; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_queued_entries_on_user_id_and_order ON public.queued_entries USING btree (user_id, "order");
 
 
 --
@@ -2016,6 +2452,13 @@ CREATE INDEX index_subscriptions_on_media_only ON public.subscriptions USING btr
 --
 
 CREATE INDEX index_subscriptions_on_show_retweets ON public.subscriptions USING btree (show_retweets);
+
+
+--
+-- Name: index_subscriptions_on_show_status; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_subscriptions_on_show_status ON public.subscriptions USING btree (show_status);
 
 
 --
@@ -2264,6 +2707,14 @@ CREATE UNIQUE INDEX unique_schema_migrations ON public.schema_migrations USING b
 
 
 --
+-- Name: podcast_subscriptions fk_rails_146c1d2d35; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.podcast_subscriptions
+    ADD CONSTRAINT fk_rails_146c1d2d35 FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+
+
+--
 -- Name: newsletter_senders fk_rails_1aa815fea5; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2272,11 +2723,35 @@ ALTER TABLE ONLY public.newsletter_senders
 
 
 --
+-- Name: podcast_subscriptions fk_rails_4bb4824ec6; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.podcast_subscriptions
+    ADD CONSTRAINT fk_rails_4bb4824ec6 FOREIGN KEY (feed_id) REFERENCES public.feeds(id) ON DELETE CASCADE;
+
+
+--
+-- Name: queued_entries fk_rails_83978fda52; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.queued_entries
+    ADD CONSTRAINT fk_rails_83978fda52 FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+
+
+--
 -- Name: unreads fk_rails_90f07702a3; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.unreads
     ADD CONSTRAINT fk_rails_90f07702a3 FOREIGN KEY (entry_id) REFERENCES public.entries(id) ON DELETE CASCADE;
+
+
+--
+-- Name: queued_entries fk_rails_9556652818; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.queued_entries
+    ADD CONSTRAINT fk_rails_9556652818 FOREIGN KEY (entry_id) REFERENCES public.entries(id) ON DELETE CASCADE;
 
 
 --
@@ -2451,6 +2926,24 @@ INSERT INTO "schema_migrations" (version) VALUES
 ('20200810160825'),
 ('20201230004844'),
 ('20210102005228'),
-('20210601200027');
+('20210601200027'),
+('20220128221704'),
+('20220204123745'),
+('20220204142012'),
+('20220204194100'),
+('20220208094739'),
+('20220209131258'),
+('20220302204617'),
+('20220302204713'),
+('20220422075327'),
+('20220505093250'),
+('20220715154209'),
+('20220719142811'),
+('20220804145624'),
+('20220806155622'),
+('20220909105317'),
+('20220916104628'),
+('20220926154041'),
+('20221004142045');
 
 

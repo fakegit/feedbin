@@ -36,9 +36,8 @@ class SiteController < ApplicationController
         purpose: "any"
       }
     ]
-    respond_to do |format|
-      format.any {render "manifest.json.jbuilder", content_type: "application/manifest+json" }
-    end
+
+    render formats: :json, content_type: "application/manifest+json"
   end
 
   private
@@ -46,6 +45,8 @@ class SiteController < ApplicationController
   def check_user
     if current_user.suspended && !native?
       redirect_to settings_billing_url, alert: "Please update your billing information to use Feedbin."
+    elsif current_user.plan.restricted? && !native?
+      redirect_to settings_url, alert: "Your subscription does not currently include web access."
     end
   end
 end
